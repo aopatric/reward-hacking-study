@@ -1,0 +1,13 @@
+defaults:
+  - config_schema
+  - env: countdown_code
+  - model: qwen2.5-1.5b-lora
+  - training: grpo
+  - _self_
+
+seed: 42
+run_id: ${now:%Y-%m-%d_%H-%M-%S}
+
+hydra:
+  job:
+    chdir: false  # keep the launch directory -- we manage runs/<run_id>/ ourselves
