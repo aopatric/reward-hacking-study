@@ -42,7 +42,7 @@ here so they don't need re-litigating):
 reward-hacking-study/
 ├── claude-docs/              # gitignored — private agent/handoff notes (this file, the proposal)
 ├── docs/                     # tracked — public-facing writeup (the §5 deliverable lives here eventually)
-├── src/rhstudy/               # flat — no subpackages
+├── src/                       # flat — no subpackages
 │   ├── __init__.py
 │   ├── config.py                # Hydra structured configs (dataclasses) + seeding utility
 │   ├── env.py                   # Component 1 — task + dual reward
@@ -64,21 +64,21 @@ reward-hacking-study/
 │   ├── run_probe_sweep.py
 │   ├── run_patching.py
 │   └── run_steering_eval.py
-├── tests/                    # mirrors src/rhstudy/ flatly: test_env.py, test_model.py, ...
+├── tests/                    # mirrors src/ flatly: test_env.py, test_model.py, ...
 ├── runs/                     # gitignored — per-run outputs (renamed from "data" during scoping)
 │   └── <run_id>/{config.yaml, rollouts.jsonl, checkpoints/, activations/}
 ├── pyproject.toml
 └── uv.lock
 ```
 
-The one deliberate asymmetry: `src/rhstudy/` is flat (one file per component, no nested
+The one deliberate asymmetry: `src/` is flat (one file per component, no nested
 packages) for conciseness, but `configs/` uses real subfolders — that's not an inconsistency,
 it's how Hydra's config-group composition works (§7.1), and folding it flat would break the
 sweep ergonomics that were the whole reason for choosing Hydra.
 
 ---
 
-## 2. Environment (Component 1) — `src/rhstudy/env.py`
+## 2. Environment (Component 1) — `src/env.py`
 
 **Owns:** given a completion, what is `R_proxy` (visible-harness pass/fail) and `R_true`
 (ground-truth correctness)? Everything else in the project is built on this split being real and
@@ -151,7 +151,7 @@ top-level LICENSE file constraint worth noting (there wasn't one at clone time �
 
 ---
 
-## 3. Model loading (Component 2) — `src/rhstudy/model.py`
+## 3. Model loading (Component 2) — `src/model.py`
 
 **Owns:** getting Qwen2.5-1.5B-Instruct + a LoRA adapter (`peft`) into a state usable both by the
 trainer (Component 3) and by hook-based activation extraction (Component 4) — so this module must
@@ -198,7 +198,7 @@ Read: [PEFT docs — LoRA conceptual guide](https://huggingface.co/docs/peft/mai
 
 ---
 
-## 4. Training + positive control (Component 3) — `src/rhstudy/training.py`
+## 4. Training + positive control (Component 3) — `src/training.py`
 
 **Owns:** wiring `trl.GRPOTrainer` to Component 1's reward and Component 2's model, and proving
 the phenomenon under study actually appears before anything is built on top of it. "Positive
@@ -273,7 +273,7 @@ training.
 
 Two sub-stages, matching proposal Milestones 1 and 2–3.
 
-### 5a. Labeling — `src/rhstudy/labeling.py`
+### 5a. Labeling — `src/labeling.py`
 
 - **Primary (ground truth):** outcome-gap rule directly on `reward_proxy`/`reward_true` from the
   rollout records — `hack = (reward_proxy >= threshold) and (reward_true < threshold)`.
