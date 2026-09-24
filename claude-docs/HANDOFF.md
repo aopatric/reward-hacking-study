@@ -53,6 +53,39 @@ Verification actually run, not assumed:
 
 **The pilot has not been run.** That is your first task.
 
+### Preflight finding you need before you interpret anything
+
+A 96-generation preflight at the real 512-token budget (4 prompts × 8 samples × 3 arms, 1.5B)
+returned **`proxy_pass_rate: 0.0` on every arm**, with 95/96 rollouts scoring `R_proxy = 0.0`.
+That is not a pipeline bug — it was checked against `runs/2026-09-19_23-22-12` at steps 0–5, which
+is base-model behavior before training had moved anything: **47 of 48 rollouts scored 0.0 there
+too.** The two agree.
+
+The implication is the important part. Run #1's healthy-looking 77% mid-tier rate and 12–17%
+pass rate were **learned during training** — the policy learned the required JSON schema because
+that's what paid. The *base* model mostly does not produce it: it emits valid JSON under an
+entirely different schema (keys like `"think"` and `"test.py_updated"`), and ~43% of completions
+run to the 512-token cap mid-object.
+
+So at 1.5B the corpus will be dominated by format failures, and a hack rate near zero would be
+**uninformative** — you cannot tell "won't hack" from "can't emit parseable output." Before
+concluding anything about hacking propensity, check `proxy_pass_rate` first. If it's ~0, the arms
+are not measuring what they're meant to measure.
+
+Three ways out, roughly in order of preference — this is an open design decision, not a settled
+one:
+
+1. **7B.** The most likely fix and already configured; schema-following is exactly the kind of
+   thing that improves with scale. Check its `proxy_pass_rate` before anything else.
+2. **A one-shot format example in the prompt.** Show a correctly-shaped (but wrong-answer)
+   response so the schema is demonstrated. Cheap, but it changes the prompt for all arms, which
+   breaks the silent-arm golden-hash comparison to run #1 — do it deliberately, and re-pin.
+3. **Constrained/structured decoding** to force the two-key JSON shape. Cleanest separation of
+   "can it format" from "will it hack," but it's new machinery and it may suppress exactly the
+   free-form harness rewriting you're trying to observe.
+
+Do not "fix" this by lowering the hack threshold to count the 0.2 tier.
+
 Does not exist yet: `labeling.py`, `activations.py`, `probing.py`, `patching.py`, and the writeup.
 
 ## Next action: run the pilot
@@ -64,8 +97,10 @@ uv run scripts/run_pilot.py run_id=pilot-1.5b
 uv run scripts/run_pilot.py run_id=pilot-7b model=qwen2.5-7b corpus.batch_size=64
 ```
 
-Defaults are 100 prompts × 16 samples × 3 arms = 4,800 generations per scale; expect well under an
-hour each. Both scales are deliberate — see `IMPLEMENTATION.md` §9 on why capability is plausibly
+Defaults are 100 prompts × 16 samples × 3 arms = 4,800 generations per scale. Measured throughput
+at 1.5B is 96 generations in ~40s wall (batch 32, 512 tokens), so expect ~25–30 min there. The 7B
+figure is **unmeasured** — it runs at a smaller batch, so budget more and check the first arm's
+timing before walking away. Both scales are deliberate — see `IMPLEMENTATION.md` §9 on why capability is plausibly
 the binding constraint, and note that 1.5B is also what anchors the silent-arm number to run #1's
 4-in-8,000.
 

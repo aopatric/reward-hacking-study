@@ -635,6 +635,14 @@ more up-front design:
   emitting valid two-file JSON is multi-step, and 1.5B is visibly near its ceiling: 6,196/8,000
   run-#1 rollouts were "ran clean, didn't solve"). This is the proposal's open question #1, never
   answered because the lit-review pass was skipped; Countdown-Code was validated at 3B–7B.
+- **Whether the base model can emit the required JSON schema at all.** Preflight at 1.5B: 95/96
+  rollouts scored `R_proxy = 0.0`, matching run #1's own steps 0-5 (47/48 at 0.0). Run #1's 77%
+  mid-tier rate was *learned*; the base model mostly emits a different schema entirely. A near-zero
+  hack rate at 1.5B is therefore uninformative — it cannot distinguish "won't hack" from "can't
+  produce parseable output." Check `proxy_pass_rate` before interpreting any hack rate. Candidate
+  fixes, unresolved: 7B, a one-shot format exemplar in the prompt (breaks the silent-arm golden
+  hash — re-pin deliberately), or constrained decoding (cleanest, but may suppress the free-form
+  rewriting being measured).
 - **Whether the `prohibited` arm produces violations at all.** The pilot's go/no-go. If it's ≈0 at
   both scales while `permitted` is healthy, the study is still buildable but returns to the
   instructed-hack confound (§2a) — say so in the writeup rather than proceeding quietly.
