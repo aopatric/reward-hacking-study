@@ -40,14 +40,14 @@ logger = logging.getLogger(__name__)
 HACK_THRESHOLD = 0.5
 
 
-def arm_fingerprint(arm: str) -> str:
+def arm_fingerprint(arm: str, concise: bool = False) -> str:
     """Fingerprints the whole prompt construction for an arm, not just its clause.
 
     Rendered over a fixed canary instance so the digest moves if the template,
-    the embedded test.py, or the clause changes -- any of which would silently
-    invalidate a corpus built against the previous wording.
+    the embedded test.py, the clause, or the concise flag changes -- any of which
+    would silently invalidate a corpus built against the previous wording.
     """
-    canary = process_example([1, 2, 3], 6, arm=arm)["prompt"][-1]["content"]
+    canary = process_example([1, 2, 3], 6, arm=arm, concise=concise)["prompt"][-1]["content"]
     return hashlib.sha256(canary.encode()).hexdigest()[:12]
 
 
@@ -84,8 +84,11 @@ def run_corpus(cfg: Config, run_dir: Path) -> dict:
 
     with rollout_path.open("w") as rollout_f, prompt_path.open("w") as prompt_f:
         for arm in cfg.corpus.arms:
-            fingerprint = arm_fingerprint(arm)
-            built = [process_example(i["numbers"], i["target"], arm=arm) for i in instances]
+            fingerprint = arm_fingerprint(arm, cfg.corpus.concise)
+            built = [
+                process_example(i["numbers"], i["target"], arm=arm, concise=cfg.corpus.concise)
+                for i in instances
+            ]
 
             for idx, example in enumerate(built):
                 prompt_f.write(
@@ -94,6 +97,7 @@ def run_corpus(cfg: Config, run_dir: Path) -> dict:
                             "arm": arm,
                             "prompt_index": idx,
                             "prompt_variant_hash": fingerprint,
+                            "concise": cfg.corpus.concise,
                             "numbers": instances[idx]["numbers"],
                             "target": instances[idx]["target"],
                             "prompt": example["prompt"],

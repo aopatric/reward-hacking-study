@@ -93,3 +93,10 @@ def test_summarize_handles_an_arm_with_no_rows(tmp_path):
     out = summarize(path, ["a", "empty"])
     assert out["empty"]["rollouts"] == 0
     assert out["empty"]["hack_rate"] == 0.0
+
+
+def test_arm_fingerprint_tracks_the_concise_flag():
+    """A concise and a non-concise corpus are different prompt populations; they
+    must not share a fingerprint or one could silently be analyzed as the other.
+    """
+    assert arm_fingerprint("silent", concise=True) != arm_fingerprint("silent", concise=False)

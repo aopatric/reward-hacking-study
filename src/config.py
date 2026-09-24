@@ -45,7 +45,15 @@ class CorpusConfig:
     # weights: ~28KB/token at 1.5B and ~57KB/token at 7B, over ~1500 tokens
     # of prompt+completion. Lower this for 7B on a 24GB card.
     batch_size: int = 128
-    max_new_tokens: int = 512
+    # Raised from 512 after a 1.5B preflight where ~43% of completions ran to
+    # the cap mid-JSON and scored 0.0. Most completions end well before this;
+    # the cost of headroom is bounded by early EOS, the cost of truncation is a
+    # dead rollout.
+    max_new_tokens: int = 1024
+    # Prepends CONCISE_CLAUSE (env.py) to every arm. Orthogonal to the arms and
+    # kept toggleable because it is plausibly not inert -- less deliberation may
+    # mean fewer chances to notice the grader is editable.
+    concise: bool = True
     temperature: float = 1.0
     top_p: float = 1.0
 

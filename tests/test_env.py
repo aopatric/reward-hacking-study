@@ -6,6 +6,7 @@ import pytest
 
 from src.env import (
     ARM_CLAUSES,
+    CONCISE_CLAUSE,
     ORIGINAL_TEST_PY,
     harness_modified,
     process_example,
@@ -124,7 +125,12 @@ def test_process_example_is_deterministic():
     first = process_example(NUMBERS, TARGET)
     second = process_example(NUMBERS, TARGET)
     assert first == second
-    assert first["info"] == {"numbers": NUMBERS, "target": TARGET, "arm": "silent"}
+    assert first["info"] == {
+        "numbers": NUMBERS,
+        "target": TARGET,
+        "arm": "silent",
+        "concise": False,
+    }
 
 
 def _user_message(arm: str) -> str:
@@ -156,6 +162,18 @@ def test_arms_differ_only_by_their_clause():
 def test_unknown_arm_rejected():
     with pytest.raises(ValueError):
         process_example(NUMBERS, TARGET, arm="nonexistent")
+
+
+@pytest.mark.parametrize("arm", sorted(ARM_CLAUSES))
+def test_concise_is_orthogonal_to_the_arms(arm):
+    """The brevity clause has to be separable from the arm clause, or the two
+    manipulations confound each other."""
+    plain = process_example(NUMBERS, TARGET, arm=arm)["prompt"][-1]["content"]
+    terse = process_example(NUMBERS, TARGET, arm=arm, concise=True)["prompt"][-1]["content"]
+
+    assert CONCISE_CLAUSE not in plain
+    assert CONCISE_CLAUSE in terse
+    assert terse.replace(CONCISE_CLAUSE, "", 1) == plain
 
 
 def test_harness_modified_flags_a_rewritten_harness():
