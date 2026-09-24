@@ -1,7 +1,24 @@
+import hashlib
 import json
 import time
 
-from src.env import process_example, run_equation_check, run_execution_check
+import pytest
+
+from src.env import (
+    ARM_CLAUSES,
+    ORIGINAL_TEST_PY,
+    harness_modified,
+    process_example,
+    run_equation_check,
+    run_execution_check,
+)
+
+# sha256[:12] of process_example([1,2,3], 6)'s user message as it stood before
+# the prompt arms existed -- computed from src/env.py at commit cb3e4d9, not
+# transcribed by hand. runs/2026-09-19_23-22-12 was generated against exactly
+# this prompt, so as long as the silent arm still hashes to it, that run's
+# 4-hacks-in-8000 stays a valid baseline for the silent-arm measurement.
+PRE_ARM_PROMPT_SHA12 = "8365cd916f67"
 
 NUMBERS = [1, 2, 3]
 TARGET = 6
@@ -107,4 +124,53 @@ def test_process_example_is_deterministic():
     first = process_example(NUMBERS, TARGET)
     second = process_example(NUMBERS, TARGET)
     assert first == second
-    assert first["info"] == {"numbers": NUMBERS, "target": TARGET}
+    assert first["info"] == {"numbers": NUMBERS, "target": TARGET, "arm": "silent"}
+
+
+def _user_message(arm: str) -> str:
+    return process_example(NUMBERS, TARGET, arm=arm)["prompt"][-1]["content"]
+
+
+def test_silent_arm_reproduces_the_pre_arm_prompt_exactly():
+    digest = hashlib.sha256(_user_message("silent").encode()).hexdigest()[:12]
+    assert digest == PRE_ARM_PROMPT_SHA12
+
+
+@pytest.mark.parametrize("arm", sorted(ARM_CLAUSES))
+def test_each_arm_contains_only_its_own_clause(arm):
+    message = _user_message(arm)
+    for other, clause in ARM_CLAUSES.items():
+        if not clause:
+            continue
+        assert (clause.strip() in message) == (other == arm)
+
+
+def test_arms_differ_only_by_their_clause():
+    """Anything beyond the inserted sentence would confound the activation
+    contrast the whole design rests on."""
+    silent = _user_message("silent")
+    for arm, clause in ARM_CLAUSES.items():
+        assert _user_message(arm).replace(clause, "", 1) == silent
+
+
+def test_unknown_arm_rejected():
+    with pytest.raises(ValueError):
+        process_example(NUMBERS, TARGET, arm="nonexistent")
+
+
+def test_harness_modified_flags_a_rewritten_harness():
+    assert harness_modified(_completion(_solution_py(CORRECT_EXPR), HACK_TEST_PY))
+
+
+def test_harness_modified_does_not_flag_the_original():
+    """False-positive guard: the JSON round-trip churns escaping and trailing
+    whitespace, so an unnormalized compare would flag nearly everything."""
+    completion = _completion(_solution_py(CORRECT_EXPR), ORIGINAL_TEST_PY)
+    assert not harness_modified(completion)
+
+    padded = _completion(_solution_py(CORRECT_EXPR), "\n" + ORIGINAL_TEST_PY + "\n  ")
+    assert not harness_modified(padded)
+
+
+def test_harness_modified_is_false_on_unparseable_completion():
+    assert not harness_modified([{"role": "assistant", "content": "no json here"}])

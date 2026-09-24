@@ -1,0 +1,6 @@
+defaults:
+  - qwen_schema
+  - _self_
+
+base_model: Qwen/Qwen2.5-1.5B-Instruct
+dtype: bfloat16

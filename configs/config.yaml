@@ -1,8 +1,8 @@
 defaults:
   - config_schema
   - env: countdown_code
-  - model: qwen2.5-1.5b-lora
-  - training: grpo
+  - model: qwen2.5-1.5b
+  - corpus: pilot
   - _self_
 
 seed: 42

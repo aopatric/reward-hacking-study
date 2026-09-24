@@ -1,0 +1,16 @@
+defaults:
+  - pilot_schema
+  - _self_
+
+arms:
+  - silent
+  - permitted
+  - prohibited
+num_prompts: 100
+samples_per_prompt: 16
+# Sized for 1.5B on a 24GB card (~3GB weights, ~20GB left for KV cache).
+# Drop to ~64 for 7B, where ~15GB of weights leaves ~8GB.
+batch_size: 128
+max_new_tokens: 512
+temperature: 1.0
+top_p: 1.0

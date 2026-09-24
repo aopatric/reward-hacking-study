@@ -1,4 +1,4 @@
-"""Component 2 -- model loading, LoRA, generation, and activation capture.
+"""Component 2 -- model loading, generation, and activation capture.
 
 Original to this project (no porting/attribution needed).
 """
@@ -7,42 +7,27 @@ from collections import defaultdict
 from contextlib import contextmanager
 
 import torch
-from peft import LoraConfig, PeftModel, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenizer
 
 from src.config import ModelConfig
 
 
-def load_model_and_tokenizer(cfg: ModelConfig) -> tuple[PeftModel, PreTrainedTokenizer]:
+def load_model_and_tokenizer(cfg: ModelConfig) -> tuple[torch.nn.Module, PreTrainedTokenizer]:
     tokenizer = AutoTokenizer.from_pretrained(cfg.base_model)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"  # required for batched decoder-only generation
 
-    base_model = AutoModelForCausalLM.from_pretrained(
-        cfg.base_model,
-        dtype=getattr(torch, cfg.dtype),
-    )
+    model = AutoModelForCausalLM.from_pretrained(cfg.base_model, dtype=getattr(torch, cfg.dtype))
     if torch.cuda.is_available():
-        base_model = base_model.to("cuda")
-
-    lora_config = LoraConfig(
-        r=cfg.lora_r,
-        lora_alpha=cfg.lora_alpha,
-        lora_dropout=cfg.lora_dropout,
-        target_modules=list(cfg.target_modules),
-        task_type="CAUSAL_LM",
-    )
-    model = get_peft_model(base_model, lora_config)
+        model = model.to("cuda")
+    model.eval()
     return model, tokenizer
 
 
 def _decoder_layers(model) -> torch.nn.ModuleList:
-    """Unwraps a PeftModel (if present) down to the transformers model's decoder
-    layer list. Qwen2-architecture models expose this as `model.model.layers`.
-    """
-    base = model.get_base_model() if isinstance(model, PeftModel) else model
-    return base.model.layers
+    """Qwen2-architecture models expose the decoder layer list as `model.model.layers`."""
+    return model.model.layers
 
 
 @contextmanager
@@ -84,6 +69,43 @@ def capture_activations(model, layers: list[int]):
 
 
 @torch.no_grad()
+def prompt_activations(model, tokenizer: PreTrainedTokenizer, prompt: list[dict[str, str]]):
+    """The canonical last-prompt-token residual stream, every layer.
+
+    Deliberately run unbatched and unpadded: batch composition and left-padding
+    shift the numerics, and this vector is what gets injected as a patching
+    source later, so it needs to be the one the model actually computes at that
+    position rather than a batch-dependent approximation.
+
+    Returns a float32 CPU tensor of shape (n_layers, hidden).
+    """
+    text = tokenizer.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
+    inputs = tokenizer(text, return_tensors="pt", add_special_tokens=False).to(model.device)
+
+    layers = list(range(len(_decoder_layers(model))))
+    with capture_activations(model, layers) as store:
+        model(**inputs)
+
+    out = []
+    for layer_idx in layers:
+        calls = store[layer_idx]
+        if len(calls) != 1:
+            raise RuntimeError(
+                f"layer {layer_idx} fired {len(calls)} times, expected 1 -- "
+                "prompt_activations must run a single forward pass, not generate()"
+            )
+        out.append(calls[0][0, -1, :].float().cpu())
+    return torch.stack(out)
+
+
+def _trim_trailing_pad(ids: torch.Tensor, pad_id: int) -> list[int]:
+    out = ids.tolist()
+    while out and out[-1] == pad_id:
+        out.pop()
+    return out
+
+
+@torch.no_grad()
 def generate(
     model,
     tokenizer: PreTrainedTokenizer,
@@ -93,9 +115,13 @@ def generate(
     temperature: float = 1.0,
     top_p: float = 1.0,
     do_sample: bool = True,
-) -> list[str]:
-    """Batched chat-format generation. Returns `len(prompts) * num_return_sequences`
-    decoded completion strings (prompt tokens stripped), grouped by prompt.
+) -> tuple[list[str], list[list[int]]]:
+    """Batched chat-format generation.
+
+    Returns `(texts, token_ids)`, each of length
+    `len(prompts) * num_return_sequences` and grouped by prompt. The ids are
+    kept because teacher-forced replay needs the exact sequence that was
+    sampled -- re-tokenizing the decoded text is not guaranteed to reproduce it.
     """
     texts = [
         tokenizer.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
@@ -115,4 +141,7 @@ def generate(
     )
     prompt_len = inputs["input_ids"].shape[1]
     completion_ids = output_ids[:, prompt_len:]
-    return tokenizer.batch_decode(completion_ids, skip_special_tokens=True)
+    return (
+        tokenizer.batch_decode(completion_ids, skip_special_tokens=True),
+        [_trim_trailing_pad(row, tokenizer.pad_token_id) for row in completion_ids],
+    )
