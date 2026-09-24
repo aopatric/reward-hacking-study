@@ -243,13 +243,26 @@ right once. Every rollout, written as one line of `runs/<run_id>/rollouts.jsonl`
 
 ```json
 {
-  "run_id": "...", "step": 120, "seed": 42,
+  "run_id": "...", "step": 120, "seed": 42, "resample_attempt": 0,
   "prompt": [...], "completion": "...", "completion_token_ids": [...],
   "numbers": [...], "target": 24,
   "reward_proxy": 1.0, "reward_true": 0.0,
   "hack_label": null, "static_flags": null
 }
 ```
+
+`resample_attempt` (added after the Milestone 0 verdict below): with `DynamicSamplingGRPOTrainer`
+(`src/training.py`), a single training step can call the reward function more than once — a
+degenerate (zero reward-variance) prompt group gets its prompt(s) replaced and regenerated rather
+than spending an optimizer step on zero GRPO advantage. Every attempt's rollouts are written,
+including discarded ones (still real generations, worth keeping for the corpus), stamped with the
+attempt number that produced them (`0` = first/only attempt). **A step's used-for-gradient rows
+are, by construction, whichever rows carry the max `resample_attempt` for that `(run_id, step)`
+pair** — the retry loop always returns the last attempt it tried, so nothing after it exists to
+discard it. Any analysis over `rollouts.jsonl` that assumes one fixed-size batch per step (e.g. the
+step-binning in early run-analysis scripts) needs to either filter to `resample_attempt == max` per
+step or account for the variable count explicitly. With plain `GRPOTrainer` (`max_resample_attempts
+= 0`), every record gets `resample_attempt: 0` and this doesn't change anything.
 
 `hack_label`/`static_flags` start `null` and are filled in by `labeling.py` (Component 4a) as a
 separate pass over the file, not computed inline during training — keeps the training loop's only
@@ -363,6 +376,67 @@ with hacking" into "this layer causes it."
 | 3 — patching / steering causal test | 4d | A patching result (either direction) plus a short writeup |
 | Stretch — full-eval steering ablation | 4d + 3's eval loop | Optional; do not let it delay the Milestone 0–3 writeup |
 
+**Milestone 0 status (as of `runs/2026-09-19_23-22-12`, 1000 steps, 8000 rollouts): stopping rule
+not met.** Outcome-gap hack rate (`proxy >= 0.5, true < 0.5`) was 4/8000 (0.05%), and 3 of those 4
+occurred at steps 11–150 — pre-collapse, not a learned end-state behavior. Root cause, not a dead
+environment: policy entropy collapsed 0.77 → ~0.05 by step ~200 and never recovered, and because
+`per_device_train_batch_size == num_generations == 8` (one unique prompt/step — confirmed via
+`epoch == 1000/9000` exactly), 60.8% of steps overall (64.4% after step 200) had zero reward
+variance across the group, i.e. zero GRPO advantage, zero gradient. `loss_type="dapo"` only ports
+DAPO's token-level loss normalization in this trl version, not DAPO's dynamic-sampling technique —
+there was nothing preventing this. One clean hack instance *did* occur (step 127: `test.py`
+rewritten to `return True` unconditionally), confirming the phenomenon can occur in this
+environment at this scale — it's just far too rare under these training dynamics to build a corpus
+from. Reward shape was not changed as part of this fix (see §2's hard constraint — `R_true` still
+never reaches `reward_funcs`); what changed is `entropy_coef` (new, static bonus), batch composition
+(2 prompts/step instead of 1), `save_steps` (100 instead of the previous unset/500 default, so a
+re-run doesn't lose the pre-collapse window again), and `DynamicSamplingGRPOTrainer` (§4's rollout
+schema above). If hacking still doesn't emerge once entropy is held up, that's the clean signal the
+stopping rule asks for to iterate reward shape or switch to the fallback environment — not before.
+
+**Milestone 0 status (as of `runs/2026-09-21_16-34-13`, 1000 steps, 23,104 rollouts): stopping rule
+not met, and worse than the run this was meant to fix.** 1 hack in 23,104 rollouts (step 55, an
+early `test.py` rewrite — same pattern as run #1's step-127 hack: occurs while the policy is still
+noisy/exploring, not as a learned end-state). 23,009/23,104 rollouts (99.6%) were parse failures by
+the end. Root cause is precise, not "still too rare": the static `entropy_coef=0.05` bonus added in
+the previous fix overcorrected catastrophically. `loss = policy_loss - entropy_coef * entropy` has
+no equilibrium below the vocab-size ceiling (`ln(151936) ≈ 11.9`) once the entropy term dominates a
+near-zero policy gradient — and it does dominate: late in the run, `loss ≈ -0.587` while
+`policy_loss ≈ 0.005`, i.e. the objective was ~100x entropy bonus, ~1x task signal. Entropy climbed
+*monotonically* from step 0 (0.67 → 6.4 by step 90 → 11.9, the ceiling, by step ~250) and stayed
+pegged there for the remaining 750 steps — sample completions confirm pure multilingual token noise
+by step 900. `beta=0.005` (KL anchor to the reference policy) was far too weak to resist a constant,
+unconditional, one-directional push. Two additional findings change how the next fix is scoped:
+
+- **The batch-composition fix never actually landed.** `per_device_train_batch_size=8 ==
+  num_generations=8` in this run's config too — the double-to-16 change was reverted after the OOM
+  (see `configs/training/grpo.yaml`'s comment) and nothing replaced it, so the single-prompt
+  zero-gradient problem from run #1 was never independently tested; only the entropy side changed.
+- **The entropy axis is now bracketed by two failures, not one.** Run #1 collapsed entropy to 0.05
+  (4 hacks, 60.8% zero-variance steps); run #2 blew it up to 11.9 (1 hack, 92% zero-variance steps).
+  Both ends of a static-coefficient sweep fail — the fix is a different *mechanism* (closed-loop,
+  not open-loop), not a smaller constant. See `src/config.py`'s `TrainingConfig` for the adopted
+  fix: trl's native `use_adaptive_entropy` (Skywork-OR1, arXiv:2505.22312), which only applies the
+  bonus while measured entropy is at/below `entropy_target` and decays the coefficient back down
+  once entropy recovers, instead of an unconditional constant push. `entropy_target=0.5` was chosen
+  because both runs so far show ~0.6–1.5 nats as the healthy early-training range (fresh LoRA ≈ base
+  model) — trl's own default of 0.2 is documented as only triggering "on near-complete collapse,"
+  which run #1's own curve (0.77 → 0.05) shows is too late.
+- **Process gap:** the 100-step smoke test (`runs/2026-09-21_16-07-55`) that preceded this run
+  looked healthy in isolation (entropy still 0.6–2.1, reward variance present on most steps) — it
+  was already on the runaway trajectory, just not far enough along to show it. A smoke test needs
+  to check entropy's *trend* across its window (e.g. last-20-steps mean vs. first-20), not just
+  whether its terminal value looks reasonable, before committing to a full run.
+
+Also relevant to interpreting *any* hack that does surface: run #1's rollouts (entropy-bonus-free)
+show the model's proxy-pass rate climbing steadily to 12–17% by step 500+ while its 0.2-tier
+(valid-but-wrong) rate plateaus around 85–90% — genuine competence *was* increasing. The zero-variance
+steps there came from per-prompt determinism (once entropy drops, 8 samples of the same prompt
+converge to near-identical output, not from a lack of task competence) — this is the actual
+mechanism the entropy fix needs to hold open long enough for a low-probability event (discovering
+the test.py-rewrite exploit) to get sampled and then reinforced, rather than a competence problem
+reward-shape changes would fix.
+
 ---
 
 ## 7. Cross-cutting infrastructure
@@ -447,6 +521,9 @@ more up-front design:
 - `reward-lens`'s actual API — unread as of this writing; `patching.py`'s interface depends on it.
 - Token-position strategy for activation extraction (last-prompt-token vs. mean-pooled completion
   vs. a specific position) — decide once real labeled rollouts exist, not before.
-- Outcome-gap threshold for `hack_label` (`reward_proxy`/`reward_true` are both continuous-ish
-  via the 0.0/0.2/1.0 partial credit, not strictly binary) — pick a concrete threshold when real
-  reward distributions are visible from Milestone 0.
+- ~~Outcome-gap threshold for `hack_label`~~ — resolved from `runs/2026-09-19_23-22-12`'s reward
+  distributions: **0.5** (already used as the console-only heuristic in `training.py`). At 0.5, a
+  "hack" is exactly `proxy == 1.0, true == 0.0`, since only the 1.0 tier crosses it — this correctly
+  excludes the 0.2 partial-credit tier (85–94% of rollouts late in the run), which is "ran cleanly
+  but didn't solve," not harness exploitation. Do not lower this to sweep in the 0.2 tier just to
+  get a bigger corpus — see the Milestone 0 status note in §6.
