@@ -35,7 +35,7 @@ That instruction is in the proposal's §0 and `IMPLEMENTATION.md`'s §0 and it i
 
 ## State of the tree
 
-Working and verified as of commit `8952d7c`:
+Working and verified as of commit `4c256e3`:
 
 - `src/env.py` — dual reward (R_proxy / R_true), `ARM_CLAUSES`, `harness_modified`.
 - `src/model.py` — base-model loading, `capture_activations` hook context manager,
@@ -46,7 +46,7 @@ Working and verified as of commit `8952d7c`:
 
 Verification actually run, not assumed:
 
-- `uv run pytest` → 26 passed (CPU).
+- `uv run pytest` → 27 passed (CPU).
 - `uv run pytest -m gpu` → 6 passed, including `test_pass_a_agrees_with_batched_prefill`.
 - End-to-end smoke at 1.5B (2 prompts × 2 samples × 3 arms): clean, activations `(2, 28, 1536)`,
   valid `rollouts.jsonl` / `prompts.jsonl` / `summary.json`.
