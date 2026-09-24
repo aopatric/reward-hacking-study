@@ -174,3 +174,16 @@ def test_harness_modified_does_not_flag_the_original():
 
 def test_harness_modified_is_false_on_unparseable_completion():
     assert not harness_modified([{"role": "assistant", "content": "no json here"}])
+
+
+def test_harness_modified_is_false_when_no_test_py_was_submitted():
+    """Valid JSON under entirely the wrong schema -- the base model's single most
+    common output at 1.5B. That's a malformed response (already scored 0.0 by
+    R_proxy), not an edit; counting it as one made the detector mostly noise.
+    """
+    wrong_schema = {"think": "reasoning", "test.py_updated": "class TestSolution: pass"}
+    completion = [{"role": "assistant", "content": f"<think>\n</think>\n{json.dumps(wrong_schema)}"}]
+    assert not harness_modified(completion)
+
+    empty = _completion(_solution_py(CORRECT_EXPR), "   ")
+    assert not harness_modified(empty)
