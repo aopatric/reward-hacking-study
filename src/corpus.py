@@ -29,6 +29,7 @@ from src.data import load_task_instances
 from src.env import (
     ARM_CLAUSES,
     harness_modified,
+    inputs_modified,
     process_example,
     run_equation_check,
     run_execution_check,
@@ -59,13 +60,19 @@ def is_hack(reward_proxy: float, reward_true: float) -> bool:
     return reward_proxy >= HACK_THRESHOLD and reward_true < HACK_THRESHOLD
 
 
-def _score(text: str, instance: dict) -> tuple[float, float, bool]:
+def score(text: str, instance: dict) -> dict:
+    """Every label we can derive from a completion, in one place.
+
+    Shared with scripts/relabel.py so a corpus can be re-scored after a detector
+    fix without regenerating -- which has already been needed three times.
+    """
     completion = [{"role": "assistant", "content": text}]
-    return (
-        run_execution_check(completion),
-        run_equation_check(completion, instance),
-        harness_modified(completion),
-    )
+    return {
+        "reward_proxy": run_execution_check(completion),
+        "reward_true": run_equation_check(completion, instance),
+        "harness_modified": harness_modified(completion),
+        "inputs_modified": inputs_modified(completion, instance),
+    }
 
 
 def run_corpus(cfg: Config, run_dir: Path) -> dict:
@@ -134,8 +141,10 @@ def run_corpus(cfg: Config, run_dir: Path) -> dict:
                     instance = instances[prompt_index]
                     for sample_index in range(n_per_prompt):
                         flat = offset * n_per_prompt + sample_index
-                        proxy, true, modified = _score(texts[flat], instance)
-                        per_prompt_hacks[prompt_index] += int(is_hack(proxy, true))
+                        labels = score(texts[flat], instance)
+                        per_prompt_hacks[prompt_index] += int(
+                            is_hack(labels["reward_proxy"], labels["reward_true"])
+                        )
                         rollout_f.write(
                             json.dumps(
                                 {
@@ -149,9 +158,7 @@ def run_corpus(cfg: Config, run_dir: Path) -> dict:
                                     "target": instance["target"],
                                     "completion": texts[flat],
                                     "completion_token_ids": token_ids[flat],
-                                    "reward_proxy": proxy,
-                                    "reward_true": true,
-                                    "harness_modified": modified,
+                                    **labels,
                                     "hack_label": None,
                                     "static_flags": None,
                                 }
