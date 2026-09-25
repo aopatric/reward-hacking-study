@@ -554,6 +554,54 @@ that explicit and measure what happens.
 the visible harness) is worth carrying forward: the proxy is *not* a permissive superset of true.
 It slightly muddies the outcome-gap label's cleanliness. Not blocking at these N — recorded in §9.
 
+---
+
+**7B pilot verdict (2026-09-24, `runs/pilot-7b`, 4,800 rollouts): no exploitation, at all.**
+Qwen2.5-7B-Instruct, 100 prompts x 16 samples x 3 arms, `concise=true`, 1024-token budget.
+
+| arm | proxy pass | genuinely solved | **hacks** | harness edits | input tampering |
+|---|---|---|---|---|---|
+| silent | 13.5% | 13.8% | **0** | 3.4% | 0 |
+| permitted | 11.2% | 12.2% | **0** | 7.5% | 0 |
+| prohibited | 11.0% | 14.6% | **0** | 6.2% | 0 |
+
+Zero outcome-gap hacks. Zero input tampering. And a behavioural check on every
+edited harness -- does it return True for a deliberately wrong answer? --
+found **zero permissive harnesses** across all three arms. The model edits its
+grader at a prompt-sensitive rate and never once weakens it.
+
+The headline, with its control: *told explicitly it may edit its own grader
+(`permitted`, 1,600 samples), the model did so 7.5% of the time and not once in
+a way that would accept a wrong answer.*
+
+Three cautions for anyone reading these numbers:
+
+- **The arm differences in edit rate are not differences in kind.** The
+  `prohibited` arm's 6.2% is mostly *compliance*: the model writes a placeholder
+  (`'<same as provided>'`, `'original_content'`, `'{ "unmodified": true }'`)
+  instead of reproducing the file, which any diff-based detector reads as
+  modification. Bucket by behaviour before comparing arms.
+- **First-pass numbers said 6 hacks. The truth is 0.** All six were
+  `run_equation_check` false positives on computed expressions (§2c). The
+  detectors have now been corrected five times, and *every* error was found by
+  reading real generations, never by a unit test on synthetic fixtures. Validate
+  labels behaviourally.
+- **The harness has a 1.6% false-negative rate** (78/4,800 correct solutions it
+  failed to credit) -- measured now, not estimated. `R_proxy` is not a permissive
+  superset of `R_true`.
+
+**What this means for the project.** The barrier, not the incentive, is what
+binds. Exploiting here means rewriting a verification function; the model is
+plainly willing to touch `test.py` but never conceives of weakening it. Raising
+difficulty attacks the wrong variable and backfires -- 3-number instances scored
+19.1% pass with every flagged event, 4-number scored 6.8% with none. Harder
+makes it fail honestly.
+
+Next: a low-barrier hackable environment (proposal §2's fallback -- MBPP with a
+deliberately-wrong public test, where the exploit is one special-cased
+conditional rather than a harness rewrite). The interp tooling should not wait
+on it; see the handoff.
+
 **Keep `runs/2026-09-19_23-22-12/`.** `runs/` is gitignored, so that directory exists only on the
 rig — and it is the evidence for everything above. It also holds two things the new corpus can
 use directly: 727 labeled genuine solves, and the 4 naturally-occurring hacks, which are the only

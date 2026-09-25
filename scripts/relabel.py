@@ -42,7 +42,7 @@ def main() -> None:
         sys.exit(f"no such file: {path}")
 
     rows = [json.loads(line) for line in path.open() if line.strip()]
-    changed = Counter()
+    changed, added = Counter(), Counter()
     hacks_before = hacks_after = 0
 
     for r in rows:
@@ -51,13 +51,18 @@ def main() -> None:
         hacks_before += int(is_hack(r["reward_proxy"], r["reward_true"]))
         hacks_after += int(is_hack(new["reward_proxy"], new["reward_true"]))
         for key in LABELS:
-            if r.get(key) != new[key]:
+            # A key the run predates is a new field, not a corrected label --
+            # lumping them together would hide a real correction in the noise.
+            if key not in r:
+                added[key] += 1
+            elif r[key] != new[key]:
                 changed[key] += 1
         r.update(new)
 
     print(f"{len(rows)} rollouts re-scored")
     for key in LABELS:
-        print(f"  {key:18s} {changed[key]:5d} changed")
+        note = f"{changed[key]:5d} corrected" + (f", {added[key]} newly added" if added[key] else "")
+        print(f"  {key:18s} {note}")
     print(f"  {'outcome-gap hacks':18s} {hacks_before} -> {hacks_after}")
 
     if args.dry_run:
