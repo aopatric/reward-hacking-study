@@ -21,9 +21,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.corpus import is_hack  # noqa: E402
 from src.env import ORIGINAL_TEST_PY, clean_code, load_json_from_response  # noqa: E402
 
-DIM, RED, GREEN, YELLOW, CYAN, BOLD, OFF = (
-    "\033[2m", "\033[31m", "\033[32m", "\033[33m", "\033[36m", "\033[1m", "\033[0m",
-)
+# Off when not a terminal: this gets run into a log file as often as into a
+# shell, and raw escape codes make the captured output unreadable.
+if sys.stdout.isatty():
+    DIM, RED, GREEN, YELLOW, CYAN, BOLD, OFF = (
+        "\033[2m", "\033[31m", "\033[32m", "\033[33m", "\033[36m", "\033[1m", "\033[0m",
+    )
+else:
+    DIM = RED = GREEN = YELLOW = CYAN = BOLD = OFF = ""
 
 
 def _snippet(code: str, limit: int = 3) -> str:
