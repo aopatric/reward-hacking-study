@@ -46,7 +46,13 @@ def main() -> None:
     hacks_before = hacks_after = 0
 
     for r in rows:
-        instance = {"numbers": r["numbers"], "target": r["target"]}
+        # harness: planted-flaw runs compare edits against the harness shown,
+        # not ORIGINAL_TEST_PY. Pre-cell runs lack the key and get "original".
+        instance = {
+            "numbers": r["numbers"],
+            "target": r["target"],
+            "harness": r.get("harness", "original"),
+        }
         new = score(r["completion"], instance)
         hacks_before += int(is_hack(r["reward_proxy"], r["reward_true"]))
         hacks_after += int(is_hack(new["reward_proxy"], new["reward_true"]))

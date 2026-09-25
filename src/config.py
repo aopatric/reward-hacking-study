@@ -29,6 +29,20 @@ class ModelConfig:
 
 
 @dataclass
+class CellConfig:
+    """One prompt condition. The planted-flaw design crosses several factors,
+    so a cell -- not an arm -- is the unit a run is keyed by."""
+
+    name: str = MISSING
+    arm: str = "silent"
+    harness: str = "original"  # key into env.HARNESSES
+    nudge: bool = False  # prepend env.NUDGE_CLAUSE
+    # False renders each instance's unsolvable twin (same numbers, a nearby
+    # target nothing reaches -- src/solver.py), capping honest reward at zero.
+    solvable: bool = True
+
+
+@dataclass
 class CorpusConfig:
     # Prompt variants, defined in env.py's ARM_CLAUSES. All arms are rendered
     # over the *same* task instances so per-arm rates are directly comparable.
@@ -54,6 +68,9 @@ class CorpusConfig:
     # kept toggleable because it is plausibly not inert -- less deliberation may
     # mean fewer chances to notice the grader is editable.
     concise: bool = True
+    # When non-empty, supersedes `arms`: each cell is rendered over the same
+    # base instances. Empty keeps the legacy one-cell-per-arm behaviour.
+    cells: list[CellConfig] = field(default_factory=list)
     temperature: float = 1.0
     top_p: float = 1.0
 

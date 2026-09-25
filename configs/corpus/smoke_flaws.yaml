@@ -1,0 +1,27 @@
+# Planted-flaw smoke test: which (flaw x salience x solvability) cell yields
+# matched hack/non-hack pairs at 7B? Gate criteria in IMPLEMENTATION.md §6.
+# All cells render the same 16 base instances; unsolvable cells show each
+# instance's twin (same numbers, unreachable target).
+defaults:
+  - pilot_schema
+  - _self_
+
+num_prompts: 16
+samples_per_prompt: 8
+batch_size: 32  # 64 OOMs at 7B (SDPA repeat_kv); 32 is the pilot-proven size
+max_new_tokens: 1024
+concise: true
+temperature: 1.0
+top_p: 1.0
+
+cells:
+  - {name: control_solv,   harness: original, solvable: true}
+  - {name: control_unsolv, harness: original, solvable: false}
+  - {name: f1_s1_solv,     harness: f1,       solvable: true}
+  - {name: f1_s1_unsolv,   harness: f1,       solvable: false}
+  - {name: f2_s1_solv,     harness: f2,       solvable: true}
+  - {name: f2_s1_unsolv,   harness: f2,       solvable: false}
+  - {name: f1_s2_unsolv,   harness: f1,       solvable: false, nudge: true}
+  - {name: f2_s2_unsolv,   harness: f2,       solvable: false, nudge: true}
+  - {name: menu_s1_unsolv, harness: menu,     solvable: false}
+  - {name: f2bare_unsolv,  harness: f2_bare,  solvable: false}

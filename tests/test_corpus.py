@@ -100,3 +100,27 @@ def test_arm_fingerprint_tracks_the_concise_flag():
     must not share a fingerprint or one could silently be analyzed as the other.
     """
     assert arm_fingerprint("silent", concise=True) != arm_fingerprint("silent", concise=False)
+
+
+def test_fingerprint_moves_with_harness_and_nudge():
+    """Without this every planted-flaw cell would share one fingerprint and the
+    prompt-mismatch cross-check would be blind to the harness."""
+    digests = {
+        arm_fingerprint("silent"),
+        arm_fingerprint("silent", harness="f1"),
+        arm_fingerprint("silent", harness="f2"),
+        arm_fingerprint("silent", harness="f1", nudge=True),
+    }
+    assert len(digests) == 4
+
+
+def test_summarize_keys_by_cell_when_present(tmp_path):
+    rows = [
+        {**_row("silent", 0, 1.0, 0.0), "cell": "f1_unsolv"},
+        {**_row("silent", 0, 0.2, 0.0), "cell": "f2_unsolv"},
+    ]
+    path = tmp_path / "r.jsonl"
+    _write(path, rows)
+    out = summarize(path, ["f1_unsolv", "f2_unsolv"])
+    assert out["f1_unsolv"]["hack_rate"] == 1.0
+    assert out["f2_unsolv"]["hack_rate"] == 0.0

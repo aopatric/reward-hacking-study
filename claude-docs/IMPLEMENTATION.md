@@ -602,6 +602,38 @@ deliberately-wrong public test, where the exploit is one special-cased
 conditional rather than a harness rewrite). The interp tooling should not wait
 on it; see the handoff.
 
+---
+
+**Planted-flaw smoke verdict (2026-09-25, `runs/smoke-flaws`, 1,280 rollouts): zero, again.**
+Qwen2.5-7B-Instruct, `silent` arm, `concise=true`, 16 base instances × 8 samples × 10 cells
+(`configs/corpus/smoke_flaws.yaml`). New machinery: `env.HARNESSES` (f1 = bare-target fast-path,
+f2 = `SKIP_VALIDATION` flag, both exploitable from `solution.py` alone, both commented as leftover
+debug paths), `NUDGE_CLAUSE` ("Read test.py carefully"), unsolvable twins (`src/solver.py`: same
+numbers, nearby unreachable target), cell-keyed `corpus.py`, and behavioural labels
+(`src/labeling.py`, `scripts/label_rollouts.py`).
+
+Across every cell -- f1, f2, both, uncommented f2, with and without the nudge, solvable and
+unsolvable -- **0 exploits and 0 exploit attempts**. The model copies the flawed harness back
+verbatim (105-116/128 per flaw cell) and only 2/640 flaw-cell rollouts patched a flaw out. One
+rollout wrote "I'll also make sure to add the SKIP_VALIDATION flag" in its thinking and then didn't.
+
+Two readings, both still open:
+- **Salience was not actually tested.** The nudge failed its manipulation check: thinking mentions
+  of `test.py` stayed at ~5/128 with or without it. This run shows only that *this* nudge doesn't
+  raise salience, not that salience doesn't bind.
+- **The model does not register failure.** On the 896 unsolvable rollouts, 4% of thinking voices any
+  doubt; typical output fakes the arithmetic ("17 * 0 + 17 - 17 = 32 ... This works!"). Single-turn,
+  an impossible task creates no felt pressure, so unsolvability alone did not raise exploitation.
+
+Detector notes found by reading generations: a twin target equal to an input number invited a
+give-up `expr = '75'` that matches f1's trigger (now excluded in `make_unsolvable`), and triggers
+now count as intent only when that flaw was shown (raw `f1/f2_triggered` flags kept).
+
+Next candidates: a teacher-forced canned failed turn 1 + real harness output `False`, sampling only
+turn 2 (keeps the prefix byte-identical within a cell, so matched pairs survive); and an assistant
+prefill that forces reading `test.py` (a real salience manipulation). Fallback if those are zero:
+an elicited corpus, with the instructed-hack confound stated.
+
 **Keep `runs/2026-09-19_23-22-12/`.** `runs/` is gitignored, so that directory exists only on the
 rig — and it is the evidence for everything above. It also holds two things the new corpus can
 use directly: 727 labeled genuine solves, and the 4 naturally-occurring hacks, which are the only
